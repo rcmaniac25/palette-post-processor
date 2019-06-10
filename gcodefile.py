@@ -14,7 +14,7 @@ class GCodeFile:
 				if tmp == '':
 					self.gcodes.append(factory.create_whitespace())
 				elif tmp.startswith(";"):
-					self.gcodes.append(factory.create_comment(line))
+					self.gcodes.append(factory.create_comment(line.rstrip()))
 				elif tmp.find(' ') > 0:
 					g = factory.create(tmp[:tmp.find(' ')], line)
 					if g:
@@ -29,4 +29,5 @@ class GCodeFile:
 						print("<2> Unknown gcode element: {0}".format(line.rstrip()))
 
 	def print(self):
-		print("Hello")
+		for g in self.gcodes:
+			g.print_raw()
