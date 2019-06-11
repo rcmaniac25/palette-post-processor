@@ -10,8 +10,21 @@ class GCode:
 			print("DEV-WARN: {0} should always be upper case".format(name))
 
 	def _populate_known_fields(self, line):
-		name = line[:line.find(' ')]
-		content = line[line.find(' ')+1:]
+		if line.find(' ') > 0:
+			name = line[:line.find(' ')]
+			content = line[line.find(' ')+1:]
+		elif not line[0].isalpha():
+			print("WARN: gcode doesn't start with a letter".format(line))
+			name = "<err>"
+			content = "<err>"
+		else:
+			count = 1
+			for c in line[1:]:
+				if not c.isdigit():
+					break
+				count = count + 1
+			name = line[:count]
+			content = line[count+1:]
 		if content.find(';') >= 0:
 			self.comment = content[content.find(';')+1:]
 			content = content[:content.find(';')]
@@ -41,7 +54,10 @@ class GCodeParted(GCode):
 			if element != '':
 				cmd = element[0].upper()
 				if cmd in known_parts:
-					self.parts[cmd] = part_parser(element[1:])
+					try:
+						self.parts[cmd] = part_parser(element[1:], cmd)
+					except:
+						self.parts[cmd] = part_parser(element[1:])
 				else:
 					print("DEV-WARN: Unknown command: {0}".format(cmd))
 
@@ -60,6 +76,19 @@ class GCodeParted(GCode):
 
 	def print_raw(self):
 		print(self._create_raw(self._create_raw_content()))
+
+class GCodePartedExtruderChoice(GCodeParted):
+	def __init__(self, known_parts, part_parser, typ, line):
+		if "T" in known_parts.upper():
+			print("DEV-WARN: {0} contains a T command, which conflicts with the extruder choice".format(typ))
+		GCodeParted.__init__(self, known_parts + "T", part_parser, typ, line)
+		
+		ex = self.extruder_index()
+		if ex and ex < 0:
+			print("WARN: {0} has an invalid extruder. Must be 0 or greater. Was T{1}".format(typ, ex))
+
+	def extruder_index(self):
+		return self._get_part('T')
 
 class GCodeWhitespace(GCode):
 	def __init__(self):
@@ -176,6 +205,53 @@ class GCodeSetBuildPercentagePrusa(GCodeSetBuildPercentage):
 		else:
 			return self._get_part('S')
 
+class GCodeSetExtruderToAbsoluteMode(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "M82")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetExtruderToRelativeMode(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "M83")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetExtruderTemperature(GCodePartedExtruderChoice):
+	def __init__(self, line):
+		GCodePartedExtruderChoice.__init__(self, "S", int, "M104", line)
+		t = self.temperature()
+		if t and t < 0:
+			print("WARN: M104 has an invalid temperature. Must be 0 or greater. Was S{0}".format(t))
+
+	def temperature(self):
+		return self._get_part('S')
+
+class GCodeFanOff(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "M107")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetBedTemperature(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "S", int, "M140", line)
+		t = self.temperature()
+		if t < 0:
+			print("WARN: M140 has an invalid temperature. Must be 0 or greater. Was S{0}".format(t))
+
+	def temperature(self):
+		return self._get_part('S')
+
 class GCodeSetDefaultAcceleration(GCodeParted):
 	def __init__(self, line):
 		GCodeParted.__init__(self, "PRST", int, "M204", line)
@@ -202,6 +278,42 @@ class GCodeSetDefaultAcceleration(GCodeParted):
 			return self._get_part('S')
 		return self._get_part('T')
 
+class GCodeAdvancedSetting(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "STBXYZE", lambda value, cmd: float(value) if cmd != 'S' and cmd != 'T' else int(value), "M205", line)
+
+	def min_feedrate(self):
+		return self._get_part('S')
+
+	def min_travel_feedrate(self):
+		return self._get_part('T')
+
+	def min_segment_time(self):
+		return self._get_part('B')
+
+	def max_x_jerk(self):
+		return self._get_part('X')
+
+	def max_y_jerk(self):
+		return self._get_part('Y')
+
+	def max_z_jerk(self):
+		return self._get_part('Z')
+
+	def max_e_jerk(self):
+		return self._get_part('E')
+
+class GCodeSetExtrudeFactorOverrude(GCodePartedExtruderChoice):
+	def __init__(self, line):
+		GCodePartedExtruderChoice.__init__(self, "S", int, "M221", line)
+		f = self.override_factor()
+		if f < 0 or f > 100:
+			print("WARN: M221 has an invalid override factor. Must be 0 to 100. Was S{0}".format(f))
+
+	# Precentage
+	def override_factor(self):
+		return self._get_part('S')
+
 # ============= Factory =============
 
 class GCodeFactory:
@@ -220,18 +332,33 @@ class GCodeFactory:
 	__known_codes = {
 		"G0" : lambda line: GCodeRapidMove(line),
 		"G1" : lambda line: GCodeLinearMove(line),
+		#G4
+		#G21
+		#G28
+		#G80
+		#G90
 		"G92" : lambda line: GCodeSetPosition(line),
+
 		"M73" : lambda line: GCodeSetBuildPercentage(line),
-		"M204" : lambda line: GCodeSetDefaultAcceleration(line)
+		"M82" : lambda line: GCodeSetExtruderToAbsoluteMode(line),
+		"M83" : lambda line: GCodeSetExtruderToRelativeMode(line),
+		#M84
+		"M104" : lambda line: GCodeSetExtruderTemperature(line),
+		#M106
+		"M107" : lambda line: GCodeFanOff(line),
+		#M109
+		#M115
+		"M140" : lambda line: GCodeSetBedTemperature(line),
+		#M190
+		#M201
+		#M203
+		"M204" : lambda line: GCodeSetDefaultAcceleration(line),
+		"M205" : lambda line: GCodeAdvancedSetting(line),
+		"M221" : lambda line: GCodeSetExtrudeFactorOverrude(line)
+		#M900
 	}
 
 # To implement, in order
-#M104 3
-#M107 3
-#M140 2
-#M221 2
-#M83 2
-#M205 2
 #M109 1
 #M190 1
 #M201 1
