@@ -1,4 +1,4 @@
-# Populated with info from https://www.reprap.org/wiki/G-code
+# Populated with info from https://www.reprap.org/wiki/G-code and https://github.com/prusa3d/Prusa-Firmware/blob/MK3/Firmware/Marlin_main.cpp
 
 # ============= Base / Special GCodes =============
 
@@ -152,6 +152,62 @@ class GCodeLinearMove(GCodeMove):
 	def is_linear_move(self):
 		return True
 
+class GCodeHome(GCodeParted):
+	def __init__(self, line):
+		#GCodeParted.__init__(self, "XYZWC", lambda value, cmd: "" if value == '' else int(value), "G28", line)
+		#Prusa supprts specifying an offset for the homing access, and for models with TMC2130 (MK3/S) it can calibrate the axis's with C. Not very important unless doing some really crazy things
+
+		GCodeParted.__init__(self, "XYZW", lambda value, cmd: '', "G28", line)
+
+		self._home_x = False
+		self._home_y = False
+		self._home_z = False
+		self._mbl = False
+
+		if len(self.parts) == 0:
+			self._home_x = True
+			self._home_y = True
+			self._home_z = True
+			self._mbl = True
+		else:
+			self._mbl = True
+			if 'X' in self.parts: self._home_x = True
+			if 'Y' in self.parts: self._home_y = True
+			if 'Z' in self.parts: self._home_z = True
+			if 'W' in self.parts: self._mbl = False
+
+	def home_x(self):
+		return self._home_x
+
+	def home_y(self):
+		return self._home_y
+
+	def home_z(self):
+		return self._home_z
+
+	# Only valid for Prusa firmware (MK2/MK3)
+	def perform_mesh_bed_leveling(self):
+		return self._mbl
+
+class GCodeMeshBedLeveling(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "NR", int, "G80", line)
+
+	def mesh_grid_points(self):
+		return self._get_part('N')
+
+	def retry_count(self):
+		return self._get_part('R')
+
+class GCodePrintMeshBedLevel(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "G81")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
 class GCodeSetPosition(GCodeParted):
 	def __init__(self, line):
 		GCodeParted.__init__(self, "XYZE", float, "G92", line)
@@ -242,6 +298,59 @@ class GCodeFanOff(GCode):
 	def print_raw(self):
 		print(self._create_raw(""))
 
+class GCodeSetExtruderTemperatureAndWait(GCodePartedExtruderChoice):
+	def __init__(self, line):
+		GCodePartedExtruderChoice.__init__(self, "SR", int, "M109", line)
+
+		c = 'S' if 'S' in self.parts else 'R'
+		t = self.temperature()
+		if t and t < 0:
+			print("WARN: M109 has an invalid temperature. Must be 0 or greater. Was {0}{1}".format(c,t))
+
+	def wait_for_cooldown(self):
+		return 'R' in self.parts
+
+	def temperature(self):
+		# S takes precedence over R, so do that first
+		if 'S' in self.parts:
+			return self._get_part('S')
+		return self._get_part('R')
+
+class GCodeFirmwareCapabilities(GCode):
+	TYPE_GET_FW_VERSION = 'V'
+	TYPE_TEST_FW_VERSION = 'U'
+	TYPE_GET_FW_INFO = ''
+
+	def __init__(self, line):
+		GCode.__init__(self, "M115")
+
+		self.typ = GCodeFirmwareCapabilities.TYPE_GET_FW_INFO
+		self.test_fw_version = None
+
+		content = self._populate_known_fields(line)
+		if content:
+			content = content.strip()
+
+			if content.startswith(GCodeFirmwareCapabilities.TYPE_GET_FW_VERSION):
+				self.typ = GCodeFirmwareCapabilities.TYPE_GET_FW_VERSION
+			elif content.startswith(GCodeFirmwareCapabilities.TYPE_TEST_FW_VERSION):
+				self.typ = GCodeFirmwareCapabilities.TYPE_TEST_FW_VERSION
+				self.test_fw_version = content[1:]
+				if self.test_fw_version.strip() == '':
+					print("WARN: M115 is testing firmware version, but missing the version")
+
+	def type(self):
+		return self.typ
+
+	def test_fw_version(self):
+		return self.test_fw_version
+
+	def print_raw(self):
+		content = self.typ
+		if self.typ == GCodeFirmwareCapabilities.TYPE_TEST_FW_VERSION:
+			content = "{0}{1}".format(content, self.test_fw_version)
+		print(self._create_raw(content))
+
 class GCodeSetBedTemperature(GCodeParted):
 	def __init__(self, line):
 		GCodeParted.__init__(self, "S", int, "M140", line)
@@ -251,6 +360,56 @@ class GCodeSetBedTemperature(GCodeParted):
 
 	def temperature(self):
 		return self._get_part('S')
+
+class GCodeSetBedTemperatureAndWait(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "SR", int, "M190", line)
+
+		c = 'S' if 'S' in self.parts else 'R'
+		t = self.temperature()
+		if t and t < 0:
+			print("WARN: M190 has an invalid temperature. Must be 0 or greater. Was {0}{1}".format(c,t))
+
+	def wait_for_cooldown(self):
+		return 'R' in self.parts
+
+	def temperature(self):
+		# S takes precedence over R, so do that first
+		if 'S' in self.parts:
+			return self._get_part('S')
+		return self._get_part('R')
+
+class GCodeMaxPrintingAcceleration(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "XYZE", int, "M201", line)
+
+	def x(self):
+		return self._get_part('X')
+
+	def y(self):
+		return self._get_part('Y')
+
+	def z(self):
+		return self._get_part('Z')
+
+	def e(self):
+		return self._get_part('E')
+
+class GCodeMaxFeedrate(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "XYZE", int, "M203", line)
+
+	def x(self):
+		return self._get_part('X')
+
+	def y(self):
+		return self._get_part('Y')
+
+	def z(self):
+		return self._get_part('Z')
+
+	def e(self):
+		return self._get_part('E')
 
 class GCodeSetDefaultAcceleration(GCodeParted):
 	def __init__(self, line):
@@ -334,8 +493,9 @@ class GCodeFactory:
 		"G1" : lambda line: GCodeLinearMove(line),
 		#G4
 		#G21
-		#G28
-		#G80
+		"G28" : lambda line: GCodeHome(line),
+		"G80" : lambda line: GCodeMeshBedLeveling(line),
+		"G81" : lambda line: GCodePrintMeshBedLevel(line),
 		#G90
 		"G92" : lambda line: GCodeSetPosition(line),
 
@@ -346,12 +506,12 @@ class GCodeFactory:
 		"M104" : lambda line: GCodeSetExtruderTemperature(line),
 		#M106
 		"M107" : lambda line: GCodeFanOff(line),
-		#M109
-		#M115
+		"M109" : lambda line: GCodeSetExtruderTemperatureAndWait(line),
+		"M115" : lambda line: GCodeFirmwareCapabilities(line),
 		"M140" : lambda line: GCodeSetBedTemperature(line),
-		#M190
-		#M201
-		#M203
+		"M190" : lambda line: GCodeSetBedTemperatureAndWait(line),
+		"M201" : lambda line: GCodeMaxPrintingAcceleration(line),
+		"M203" : lambda line: GCodeMaxFeedrate(line),
 		"M204" : lambda line: GCodeSetDefaultAcceleration(line),
 		"M205" : lambda line: GCodeAdvancedSetting(line),
 		"M221" : lambda line: GCodeSetExtrudeFactorOverrude(line)
@@ -359,13 +519,6 @@ class GCodeFactory:
 	}
 
 # To implement, in order
-#M109 1
-#M190 1
-#M201 1
-#M203 1
-#M115 1
-#G28 1
-#G80 1
 #M900 1
 #G21 1
 #G90 1
