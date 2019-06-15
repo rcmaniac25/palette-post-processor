@@ -152,6 +152,24 @@ class GCodeLinearMove(GCodeMove):
 	def is_linear_move(self):
 		return True
 
+class GCodeSetUnitsToInches(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "G20")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetUnitsToMillimeters(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "G21")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
 class GCodeHome(GCodeParted):
 	def __init__(self, line):
 		#GCodeParted.__init__(self, "XYZWC", lambda value, cmd: "" if value == '' else int(value), "G28", line)
@@ -202,6 +220,24 @@ class GCodeMeshBedLeveling(GCodeParted):
 class GCodePrintMeshBedLevel(GCode):
 	def __init__(self, line):
 		GCode.__init__(self, "G81")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetToAbsolutePositioning(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "G90")
+
+		self._populate_known_fields(line)
+
+	def print_raw(self):
+		print(self._create_raw(""))
+
+class GCodeSetToRelativePositioning(GCode):
+	def __init__(self, line):
+		GCode.__init__(self, "G91")
 
 		self._populate_known_fields(line)
 
@@ -492,11 +528,13 @@ class GCodeFactory:
 		"G0" : lambda line: GCodeRapidMove(line),
 		"G1" : lambda line: GCodeLinearMove(line),
 		#G4
-		#G21
+		"G20" : lambda line: GCodeSetUnitsToInches(line),
+		"G21" : lambda line: GCodeSetUnitsToMillimeters(line),
 		"G28" : lambda line: GCodeHome(line),
 		"G80" : lambda line: GCodeMeshBedLeveling(line),
 		"G81" : lambda line: GCodePrintMeshBedLevel(line),
-		#G90
+		"G90" : lambda line: GCodeSetToAbsolutePositioning(line),
+		"G91" : lambda line: GCodeSetToRelativePositioning(line),
 		"G92" : lambda line: GCodeSetPosition(line),
 
 		"M73" : lambda line: GCodeSetBuildPercentage(line),
@@ -520,8 +558,6 @@ class GCodeFactory:
 
 # To implement, in order
 #M900 1
-#G21 1
-#G90 1
 #M106 1
 #G4 1
 #M84 1
