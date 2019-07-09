@@ -509,6 +509,56 @@ class GCodeSetExtrudeFactorOverrude(GCodePartedExtruderChoice):
 	def override_factor(self):
 		return self._get_part('S')
 
+# ============= T-GCodes =============
+
+class GCodeToolChange(GCodeParted):
+	def __init__(self, line):
+		cmd = "T0"
+		tool = 0
+		if len(line) >= 2 and line[0] == 'T':
+			parts = line.split(' ')
+			tool_str = parts[0][1:]
+			if tool_str.isdigit():
+				tool = int(tool_str)
+			elif tool_str == '?' or tool_str == 'x' or tool_str == 'c':
+				tool = tool_str
+			else:
+				print("WARN: Unknown tool change: {0}".format(line))
+		else:
+			print("WARN: Tool change has an invalid value: {0}".format(line))
+
+		GCodeParted.__init__(self, "P", int, cmd, line)
+
+		self._tool = tool
+
+	def tool(self):
+		if self._tool is int:
+			return self._tool
+		else:
+			return None
+
+	def macro_bitmask(self):
+		return self._get_part('P')
+
+	def prusa_version(self):
+		return GCodeToolChangePrusa(self._line)
+
+class GCodeToolChangePrusa(GCodeToolChange):
+	def __init__(self, line):
+		GCodeToolChange.__init__(self, line)
+
+	def prusa_version(self):
+		return self
+
+	def user_request_mmu_selection(self):
+		return self._tool == '?'
+
+	def load_to_gears(self):
+		return self._tool == 'x' or self._tool == '?'
+
+	def load_to_nozzle(self):
+		return self._tool == 'c'
+
 # ============= Factory =============
 
 class GCodeFactory:
@@ -522,6 +572,8 @@ class GCodeFactory:
 		typ_upper = typ.upper()
 		if typ_upper in self.__known_codes:
 			return self.__known_codes[typ_upper](line)
+		elif len(typ_upper) >= 2 and typ_upper[0] == 'T':
+			return GCodeToolChange(line)
 		return None
 
 	__known_codes = {
