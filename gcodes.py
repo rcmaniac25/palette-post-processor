@@ -152,6 +152,26 @@ class GCodeLinearMove(GCodeMove):
 	def is_linear_move(self):
 		return True
 
+class GCodeDwell(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "PS", int, "G4", line)
+
+	def time_ms(self):
+		if 'S' in self.parts:
+			return self._get_part('S') * 1000
+		elif 'P' in self.parts:
+			return self._get_part('P')
+		else:
+			return 0
+
+	def time_sec(self):
+		if 'S' in self.parts:
+			return self._get_part('S')
+		elif 'P' in self.parts:
+			return self._get_part('P') / 1000.0
+		else:
+			return 0
+
 class GCodeSetUnitsToInches(GCode):
 	def __init__(self, line):
 		GCode.__init__(self, "G20")
@@ -324,6 +344,22 @@ class GCodeSetExtruderTemperature(GCodePartedExtruderChoice):
 
 	def temperature(self):
 		return self._get_part('S')
+
+class GCodeFanOn(GCodeParted):
+	# RepRapFirmware supports a bunch of other params... but I've not seen these (probably because I've not seen a non-Marlin running printer)
+
+	def __init__(self, line):
+		GCodeParted.__init__(self, "PS", float, "M106", line)
+
+	def fan_index(self):
+		if 'P' in self.parts:
+			return self._get_part('P')
+		return 0
+
+	def fan_speed(self):
+		if 'S' in self.parts:
+			return self._get_part('S')
+		return 255
 
 class GCodeFanOff(GCode):
 	def __init__(self, line):
@@ -509,6 +545,25 @@ class GCodeSetExtrudeFactorOverrude(GCodePartedExtruderChoice):
 	def override_factor(self):
 		return self._get_part('S')
 
+class GCodeSetLinearAdvanceScalingFactors(GCodeParted):
+	def __init__(self, line):
+		GCodeParted.__init__(self, "KRWHD", float, "M900", line)
+
+	def advance_k_factor(self):
+		return self._get_part('K')
+
+	def direct_ratio(self):
+		return self._get_part('R')
+
+	def ratio_width(self):
+		return self._get_part('W')
+
+	def ratio_height(self):
+		return self._get_part('H')
+
+	def ratio_diameter(self):
+		return self._get_part('D')
+
 # ============= T-GCodes =============
 
 class GCodeToolChange(GCodeParted):
@@ -527,6 +582,8 @@ class GCodeToolChange(GCodeParted):
 		else:
 			print("WARN: Tool change has an invalid value: {0}".format(line))
 
+		if tool != 0:
+			cmd = "T{0}".format(tool)
 		GCodeParted.__init__(self, "P", int, cmd, line)
 
 		self._tool = tool
@@ -579,7 +636,7 @@ class GCodeFactory:
 	__known_codes = {
 		"G0" : lambda line: GCodeRapidMove(line),
 		"G1" : lambda line: GCodeLinearMove(line),
-		#G4
+		"G4" : lambda line: GCodeDwell(line),
 		"G20" : lambda line: GCodeSetUnitsToInches(line),
 		"G21" : lambda line: GCodeSetUnitsToMillimeters(line),
 		"G28" : lambda line: GCodeHome(line),
@@ -594,7 +651,7 @@ class GCodeFactory:
 		"M83" : lambda line: GCodeSetExtruderToRelativeMode(line),
 		#M84
 		"M104" : lambda line: GCodeSetExtruderTemperature(line),
-		#M106
+		"M106" : lambda line: GCodeFanOn(line),
 		"M107" : lambda line: GCodeFanOff(line),
 		"M109" : lambda line: GCodeSetExtruderTemperatureAndWait(line),
 		"M115" : lambda line: GCodeFirmwareCapabilities(line),
@@ -604,12 +661,9 @@ class GCodeFactory:
 		"M203" : lambda line: GCodeMaxFeedrate(line),
 		"M204" : lambda line: GCodeSetDefaultAcceleration(line),
 		"M205" : lambda line: GCodeAdvancedSetting(line),
-		"M221" : lambda line: GCodeSetExtrudeFactorOverrude(line)
-		#M900
+		"M221" : lambda line: GCodeSetExtrudeFactorOverrude(line),
+		"M900" : lambda line: GCodeSetLinearAdvanceScalingFactors(line)
 	}
 
 # To implement, in order
-#M900 1
-#M106 1
-#G4 1
 #M84 1
